@@ -51,8 +51,16 @@ class DataLoader:
     '''
 
     def __init__(self):
+
         self._basedir = '.'
+
+        # NOTE: not effective with forks as the main copy does not get updated.
+        # avoids rereading files
         self._FILE_CACHE = dict()
+
+        # NOTE: not thread safe, also issues with forks not returning data to main proc
+        #       so they need to be cleaned independently. See WorkerProcess for example.
+        # used to keep track of temp files for cleaning
         self._tempfiles = set()
 
         # initialize the vault stuff with an empty password
@@ -67,11 +75,11 @@ class DataLoader:
     def set_vault_secrets(self, vault_secrets):
         self._vault.secrets = vault_secrets
 
-    def load(self, data, file_name='<string>', show_content=True):
+    def load(self, data, file_name='<string>', show_content=True, json_only=False):
         '''Backwards compat for now'''
-        return from_yaml(data, file_name, show_content, self._vault.secrets)
+        return from_yaml(data, file_name, show_content, self._vault.secrets, json_only=json_only)
 
-    def load_from_file(self, file_name, cache=True, unsafe=False):
+    def load_from_file(self, file_name, cache=True, unsafe=False, json_only=False):
         ''' Loads data from a file, which can contain either JSON or YAML.  '''
 
         file_name = self.path_dwim(file_name)
@@ -86,7 +94,7 @@ class DataLoader:
             (b_file_data, show_content) = self._get_file_contents(file_name)
 
             file_data = to_text(b_file_data, errors='surrogate_or_strict')
-            parsed_data = self.load(data=file_data, file_name=file_name, show_content=show_content)
+            parsed_data = self.load(data=file_data, file_name=file_name, show_content=show_content, json_only=json_only)
 
             # cache the file contents for next time
             self._FILE_CACHE[file_name] = parsed_data
@@ -190,20 +198,34 @@ class DataLoader:
         ''' imperfect role detection, roles are still valid w/o tasks|meta/main.yml|yaml|etc '''
 
         b_path = to_bytes(path, errors='surrogate_or_strict')
+        b_path_dirname = os.path.dirname(b_path)
         b_upath = to_bytes(unfrackpath(path, follow=False), errors='surrogate_or_strict')
 
-        for b_finddir in (b'meta', b'tasks'):
-            for b_suffix in (b'.yml', b'.yaml', b''):
-                b_main = b'main%s' % (b_suffix)
-                b_tasked = os.path.join(b_finddir, b_main)
+        untasked_paths = (
+            os.path.join(b_path, b'main.yml'),
+            os.path.join(b_path, b'main.yaml'),
+            os.path.join(b_path, b'main'),
+        )
+        tasked_paths = (
+            os.path.join(b_upath, b'tasks/main.yml'),
+            os.path.join(b_upath, b'tasks/main.yaml'),
+            os.path.join(b_upath, b'tasks/main'),
+            os.path.join(b_upath, b'meta/main.yml'),
+            os.path.join(b_upath, b'meta/main.yaml'),
+            os.path.join(b_upath, b'meta/main'),
+            os.path.join(b_path_dirname, b'tasks/main.yml'),
+            os.path.join(b_path_dirname, b'tasks/main.yaml'),
+            os.path.join(b_path_dirname, b'tasks/main'),
+            os.path.join(b_path_dirname, b'meta/main.yml'),
+            os.path.join(b_path_dirname, b'meta/main.yaml'),
+            os.path.join(b_path_dirname, b'meta/main'),
+        )
 
-                if (
-                    RE_TASKS.search(path) and
-                    os.path.exists(os.path.join(b_path, b_main)) or
-                    os.path.exists(os.path.join(b_upath, b_tasked)) or
-                    os.path.exists(os.path.join(os.path.dirname(b_path), b_tasked))
-                ):
-                    return True
+        exists_untasked = map(os.path.exists, untasked_paths)
+        exists_tasked = map(os.path.exists, tasked_paths)
+        if RE_TASKS.search(path) and any(exists_untasked) or any(exists_tasked):
+            return True
+
         return False
 
     def path_dwim_relative(self, path, dirname, source, is_role=False):
@@ -273,8 +295,8 @@ class DataLoader:
         :returns: An absolute path to the filename ``source`` if found
         :raises: An AnsibleFileNotFound Exception if the file is found to exist in the search paths
         '''
-        b_dirname = to_bytes(dirname)
-        b_source = to_bytes(source)
+        b_dirname = to_bytes(dirname, errors='surrogate_or_strict')
+        b_source = to_bytes(source, errors='surrogate_or_strict')
 
         result = None
         search = []
@@ -305,8 +327,8 @@ class DataLoader:
             # always append basedir as last resort
             # don't add dirname if user already is using it in source
             if b_source.split(b'/')[0] != dirname:
-                search.append(os.path.join(to_bytes(self.get_basedir()), b_dirname, b_source))
-            search.append(os.path.join(to_bytes(self.get_basedir()), b_source))
+                search.append(os.path.join(to_bytes(self.get_basedir(), errors='surrogate_or_strict'), b_dirname, b_source))
+            search.append(os.path.join(to_bytes(self.get_basedir(), errors='surrogate_or_strict'), b_source))
 
             display.debug(u'search_path:\n\t%s' % to_text(b'\n\t'.join(search)))
             for b_candidate in search:
@@ -316,13 +338,13 @@ class DataLoader:
                     break
 
         if result is None:
-            raise AnsibleFileNotFound(file_name=source, paths=[to_text(p) for p in search])
+            raise AnsibleFileNotFound(file_name=source, paths=[to_native(p) for p in search])
 
         return result
 
     def _create_content_tempfile(self, content):
         ''' Create a tempfile containing defined content '''
-        fd, content_tempfile = tempfile.mkstemp()
+        fd, content_tempfile = tempfile.mkstemp(dir=C.DEFAULT_LOCAL_TMP)
         f = os.fdopen(fd, 'wb')
         content = to_bytes(content)
         try:
@@ -385,11 +407,15 @@ class DataLoader:
             self._tempfiles.remove(file_path)
 
     def cleanup_all_tmp_files(self):
-        for f in self._tempfiles:
+        """
+        Removes all temporary files that DataLoader has created
+        NOTE: not thread safe, forks also need special handling see __init__ for details.
+        """
+        for f in list(self._tempfiles):
             try:
                 self.cleanup_tmp_file(f)
             except Exception as e:
-                display.warning("Unable to cleanup temp files: %s" % to_native(e))
+                display.warning("Unable to cleanup temp files: %s" % to_text(e))
 
     def find_vars_files(self, path, name, extensions=None, allow_dir=True):
         """

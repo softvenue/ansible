@@ -8,7 +8,7 @@ Introduction
 
 Ansible + Google have been working together on a set of auto-generated
 Ansible modules designed to consistently and comprehensively cover the entirety
-of the Google Cloud Platform.
+of the Google Cloud Platform (GCP).
 
 Ansible contains modules for managing Google Cloud Platform resources,
 including creating instances, controlling network access, working with
@@ -18,7 +18,8 @@ These new modules can be found under a new consistent name scheme "gcp_*"
 (Note: gcp_target_proxy and gcp_url_map are legacy modules, despite the "gcp_*"
 name. Please use gcp_compute_target_proxy and gcp_compute_url_map instead).
 
-Additionally, the gcp_compute inventory plugin can discover all GCE instances
+Additionally, the gcp_compute inventory plugin can discover all
+Google Compute Engine (GCE) instances
 and make them automatically available in your Ansible inventory.
 
 You may see a collection of other GCP modules that do not conform to this
@@ -29,20 +30,20 @@ used, but you may experience issues trying to use them together.
 
 While the community GCP modules are not going away, Google is investing effort
 into the new "gcp_*" modules. Google is committed to ensuring the Ansible
-community has a great experience with GCP and therefore recommends adopting 
+community has a great experience with GCP and therefore recommends adopting
 these new modules if possible.
 
 
 Requisites
 ---------------
-The Google Cloud Platform (GCP) modules require both the ``requests`` and the
+The GCP modules require both the ``requests`` and the
 ``google-auth`` libraries to be installed.
 
 .. code-block:: bash
 
     $ pip install requests google-auth
 
-Alternatively for RHEL / CentOS, the ``python-requests`` package is also 
+Alternatively for RHEL / CentOS, the ``python-requests`` package is also
 available to satisfy ``requests`` libraries.
 
 .. code-block:: bash
@@ -95,7 +96,7 @@ you can use the following configuration:
        project: my-project
        auth_kind: serviceaccount
        scopes:
-         - www.googleapis.com/auth/compute
+         - https://www.googleapis.com/auth/compute
 
      tasks:
 
@@ -156,11 +157,11 @@ Create an instance
 The full range of GCP modules provide the ability to create a wide variety of
 GCP resources with the full support of the entire GCP API.
 
-The following playbook creates a GCE Instance. This instance relies on a GCP
-network and a Disk. By creating the Disk and Network separately, we can give as
-much detail as necessary about how we want the disk and network formatted. By
-registering a Disk/Network to a variable, we can simply insert the variable
-into the instance task. The gcp_compute_instance module will figure out the
+The following playbook creates a GCE Instance. This instance relies on other GCP
+resources like Disk. By creating other resources separately, we can give as
+much detail as necessary about how we want to configure the other resources, for example
+formatting of the Disk. By registering it to a variable, we can simply insert the 
+variable into the instance task. The gcp_compute_instance module will figure out the
 rest.
 
 .. code-block:: yaml
@@ -189,16 +190,6 @@ rest.
               - https://www.googleapis.com/auth/compute
             state: present
         register: disk
-      - name: create a network
-        gcp_compute_network:
-            name: 'network-instance'
-            project: "{{ gcp_project }}"
-            auth_kind: "{{ gcp_cred_kind }}"
-            service_account_file: "{{ gcp_cred_file }}"
-            scopes:
-              - https://www.googleapis.com/auth/compute
-            state: present
-        register: network
       - name: create a address
         gcp_compute_address:
             name: 'address-instance'
@@ -220,7 +211,7 @@ rest.
                 boot: true
                 source: "{{ disk }}"
             network_interfaces:
-                - network: "{{ network }}"
+                - network: null # use default
                   access_configs:
                     - name: 'External NAT'
                       nat_ip: "{{ address }}"
@@ -233,17 +224,17 @@ rest.
               - https://www.googleapis.com/auth/compute
         register: instance
 
-       - name: Wait for SSH to come up
-         wait_for: host={{ instance.address }} port=22 delay=10 timeout=60
+      - name: Wait for SSH to come up
+        wait_for: host={{ address.address }} port=22 delay=10 timeout=60
 
-       - name: Add host to groupname
-         add_host: hostname={{ instance.address }} groupname=new_instances
+      - name: Add host to groupname
+        add_host: hostname={{ address.address }} groupname=new_instances
 
 
    - name: Manage new instances
      hosts: new_instances
      connection: ssh
-     sudo: True
+     become: True
      roles:
        - base_configuration
        - production_server
@@ -268,7 +259,7 @@ module (and more!). Below is a mapping of ``gce`` fields over to
 ``gcp_compute_instance`` fields.
 
 ============================  ==========================================  ======================
- gce.py                        gcp_compute_instance.py                     Notes 
+ gce.py                        gcp_compute_instance.py                     Notes
 ============================  ==========================================  ======================
  state                        state/status                                State on gce has multiple values: "present", "absent", "stopped", "started", "terminated". State on gcp_compute_instance is used to describe if the instance exists (present) or does not (absent). Status is used to describe if the instance is "started", "stopped" or "terminated".
  image                        disks[].initialize_params.source_image      You'll need to create a single disk using the disks[] parameter and set it to be the boot disk (disks[].boot = true)
@@ -306,6 +297,6 @@ An example playbook is below:
       auth_kind: "service_account_file"
       service_account_file: "~/my_account.json"
       state: present
-  with_items:
+  loop:
     - instance-1
     - instance-2

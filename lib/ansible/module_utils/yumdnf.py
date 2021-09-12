@@ -9,6 +9,9 @@
 #    - Abhijeet Kasurde (@Akasurde)
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
+from __future__ import (absolute_import, division, print_function)
+__metaclass__ = type
+
 import os
 import time
 import glob
@@ -23,21 +26,22 @@ yumdnf_argument_spec = dict(
         allow_downgrade=dict(type='bool', default=False),
         autoremove=dict(type='bool', default=False),
         bugfix=dict(required=False, type='bool', default=False),
+        cacheonly=dict(type='bool', default=False),
         conf_file=dict(type='str'),
         disable_excludes=dict(type='str', default=None),
         disable_gpg_check=dict(type='bool', default=False),
-        disable_plugin=dict(type='list', default=[]),
-        disablerepo=dict(type='list', default=[]),
+        disable_plugin=dict(type='list', elements='str', default=[]),
+        disablerepo=dict(type='list', elements='str', default=[]),
         download_only=dict(type='bool', default=False),
         download_dir=dict(type='str', default=None),
-        enable_plugin=dict(type='list', default=[]),
-        enablerepo=dict(type='list', default=[]),
-        exclude=dict(type='list', default=[]),
+        enable_plugin=dict(type='list', elements='str', default=[]),
+        enablerepo=dict(type='list', elements='str', default=[]),
+        exclude=dict(type='list', elements='str', default=[]),
         installroot=dict(type='str', default="/"),
         install_repoquery=dict(type='bool', default=True),
         install_weak_deps=dict(type='bool', default=True),
         list=dict(type='str'),
-        name=dict(type='list', aliases=['pkg'], default=[]),
+        name=dict(type='list', elements='str', aliases=['pkg'], default=[]),
         releasever=dict(default=None),
         security=dict(type='bool', default=False),
         skip_broken=dict(type='bool', default=False),
@@ -46,7 +50,7 @@ yumdnf_argument_spec = dict(
         update_cache=dict(type='bool', default=False, aliases=['expire-cache']),
         update_only=dict(required=False, default="no", type='bool'),
         validate_certs=dict(type='bool', default=True),
-        lock_timeout=dict(type='int', default=0),
+        lock_timeout=dict(type='int', default=30),
     ),
     required_one_of=[['name', 'list', 'update_cache']],
     mutually_exclusive=[['name', 'list']],
@@ -68,6 +72,7 @@ class YumDnf(with_metaclass(ABCMeta, object)):
         self.allow_downgrade = self.module.params['allow_downgrade']
         self.autoremove = self.module.params['autoremove']
         self.bugfix = self.module.params['bugfix']
+        self.cacheonly = self.module.params['cacheonly']
         self.conf_file = self.module.params['conf_file']
         self.disable_excludes = self.module.params['disable_excludes']
         self.disable_gpg_check = self.module.params['disable_gpg_check']
@@ -126,15 +131,26 @@ class YumDnf(with_metaclass(ABCMeta, object)):
         # default isn't a bad idea
         self.lockfile = '/var/run/yum.pid'
 
+    @abstractmethod
+    def is_lockfile_pid_valid(self):
+        return
+
+    def _is_lockfile_present(self):
+        return (os.path.isfile(self.lockfile) or glob.glob(self.lockfile)) and self.is_lockfile_pid_valid()
+
     def wait_for_lock(self):
         '''Poll until the lock is removed if timeout is a positive number'''
-        if (os.path.isfile(self.lockfile) or glob.glob(self.lockfile)):
-            if self.lock_timeout > 0:
-                for iteration in range(0, self.lock_timeout):
-                    time.sleep(1)
-                    if not os.path.isfile(self.lockfile) and not glob.glob(self.lockfile):
-                        return
-            self.module.fail_json(msg='{0} lockfile is held by another process'.format(self.pkg_mgr_name))
+
+        if not self._is_lockfile_present():
+            return
+
+        if self.lock_timeout > 0:
+            for iteration in range(0, self.lock_timeout):
+                time.sleep(1)
+                if not self._is_lockfile_present():
+                    return
+
+        self.module.fail_json(msg='{0} lockfile is held by another process'.format(self.pkg_mgr_name))
 
     def listify_comma_sep_strings_in_list(self, some_list):
         """

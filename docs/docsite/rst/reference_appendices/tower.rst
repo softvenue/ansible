@@ -1,12 +1,12 @@
-.. _ansible_tower:
+.. _ansible_platform:
 
-Ansible Tower
-=============
+Red Hat Ansible Automation Platform
+===================================
 
-`Ansible Tower <https://www.ansible.com/products/tower>`_ (formerly 'AWX') is a web-based solution that makes Ansible even more easy to use for IT teams of all kinds.  It's designed to be the hub for all of your automation tasks.
+`Red Hat Ansible Automation Platform <https://www.ansible.com/products/automation-platform>`_ (RHAAP) is an integrated solution for operationalizing Ansible across your team, organization, and enterprise. The platform includes a controller with a web console and REST API, analytics, execution environments, and much more.
 
-Tower allows you to control access to who can access what, even allowing sharing of SSH credentials without someone being able to transfer those credentials.  Inventory can be graphically managed or synced with a wide variety of cloud sources.  It logs all of your jobs, integrates well with LDAP, and has an amazing browsable REST API.  Command line tools are available for easy integration with Jenkins as well.  Provisioning callbacks provide great support for autoscaling topologies.
+RHAAP gives you role-based access control, including control over the use of securely stored credentials for SSH and other services. You can sync your inventory with a wide variety of cloud sources, and powerful multi-playbook workflows allow you to model complex processes.
 
-Find out more about Tower features and how to download it on the `Ansible Tower webpage <https://www.ansible.com/products/tower>`_.  Tower
-is free for usage for up to 10 nodes, and comes bundled with amazing support from Ansible, Inc.  As you would expect, Tower is
-installed using Ansible playbooks!
+RHAAP logs all of your jobs, integrates well with LDAP, SAML, and other authentication sources, and has an amazing browsable REST API. Command line tools are available for easy integration with Jenkins as well.
+
+RHAAP incorporates the downstream Red Hat supported product version of Ansible AWX, the downstream Red Hat supported product version of Ansible Galaxy, and multiple SaaS offerings. Find out more about RHAAP features and on the `Red Hat Ansible Automation Platform webpage <https://www.ansible.com/products/automation-platform>`_. A Red Hat Ansible Automation Platform subscription includes support from Red Hat, Inc.

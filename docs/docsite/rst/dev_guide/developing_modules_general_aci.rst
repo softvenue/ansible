@@ -18,9 +18,9 @@ What's covered in this section:
 
 Introduction
 ============
-Ansible already ships with a large collection of Cisco ACI modules, however the ACI object model is huge and covering all possible functionality would easily cover more than 1500 individual modules.
+The `cisco.aci collection <https://galaxy.ansible.com/cisco/aci>`_ already includes a large number of Cisco ACI modules, however the ACI object model is huge and covering all possible functionality would easily cover more than 1500 individual modules.
 
-If you are in need of specific functionality, you have 2 options:
+If you need specific functionality, you have 2 options:
 
 - Learn the ACI object model and use the low-level APIC REST API using the :ref:`aci_rest <aci_rest_module>` module
 - Write your own dedicated modules, which is actually quite easy
@@ -113,7 +113,7 @@ Once the AnsibleModule object has been initiated, the necessary parameter values
     object_prop3 = module.params['object_prop3']
     if object_prop3 is not None and object_prop3 not in range(x, y):
         module.fail_json(msg='Valid object_prop3 values are between x and (y-1)')
-    child_object_id = module.params[' child_objec_id']
+    child_object_id = module.params['child_object_id']
     child_object_prop = module.params['child_object_prop']
     state = module.params['state']
 
@@ -151,13 +151,13 @@ The ``construct_url()`` method takes 2 required arguments:
 * **self** - passed automatically with the class instance
 * **root_class** - A dictionary consisting of ``aci_class``, ``aci_rn``, ``target_filter``, and ``module_object`` keys
 
-  + **aci_class**: The name of the class used by the APIC, e.g. ``fvTenant``
+  + **aci_class**: The name of the class used by the APIC, for example ``fvTenant``
 
-  + **aci_rn**: The relative name of the object, e.g. ``tn-ACME``
+  + **aci_rn**: The relative name of the object, for example ``tn-ACME``
 
-  + **target_filter**: A dictionary with key-value pairs that make up the query string for selecting a subset of entries, e.g. ``{'name': 'ACME'}``
+  + **target_filter**: A dictionary with key-value pairs that make up the query string for selecting a subset of entries, for example ``{'name': 'ACME'}``
 
-  + **module_object**: The particular object for this class, e.g. ``ACME``
+  + **module_object**: The particular object for this class, for example ``ACME``
 
 Example:
 
@@ -220,7 +220,7 @@ The ``aci.payload()`` method is used to build a dictionary of the proposed objec
 
 The ``aci.payload()`` method takes two required arguments and 1 optional argument, depending on if the module manages child objects.
 
-* ``aci_class`` is the APIC name for the object's class, e.g. ``aci_class='fvBD'``
+* ``aci_class`` is the APIC name for the object's class, for example ``aci_class='fvBD'``
 * ``class_config`` is the appropriate dictionary to be used as the payload for the POST request
 
   + The keys should match the names used by the APIC.
@@ -263,7 +263,7 @@ Example: ``aci.post_config()``
 
 Example code
 """"""""""""
-.. code-block:: guess
+.. code-block:: text
 
     if state == 'present':
         aci.payload(
@@ -285,9 +285,9 @@ Example code
                 ),
             ],
         )
-        
+
         aci.get_diff(aci_class='<object APIC class>')
-        
+
         aci.post_config()
 
 
@@ -295,7 +295,7 @@ When state is absent
 ^^^^^^^^^^^^^^^^^^^^
 If the task sets the state to absent, then the ``delete_config()`` method is all that is needed. This method does not take any arguments, and handles check mode.
 
-.. code-block:: guess
+.. code-block:: text
 
         elif state == 'absent':
             aci.delete_config()
@@ -305,7 +305,7 @@ Exiting the module
 ^^^^^^^^^^^^^^^^^^
 To have the module exit, call the ACIModule method ``exit_json()``. This method automatically takes care of returning the common return values for you.
 
-.. code-block:: guess
+.. code-block:: text
 
         aci.exit_json()
 
@@ -319,13 +319,13 @@ Testing ACI library functions
 =============================
 You can test your ``construct_url()`` and ``payload()`` arguments without accessing APIC hardware by using the following python script:
 
-.. code-block:: guess
+.. code-block:: text
 
     #!/usr/bin/python
     import json
     from ansible.module_utils.network.aci.aci import ACIModule
-    
-    # Just another class mimicking a bare AnsibleModule class for construct_url() and payload() methods
+
+    # Just another class mimicing a bare AnsibleModule class for construct_url() and payload() methods
     class AltModule():
         params = dict(
             host='dummy',
@@ -334,21 +334,21 @@ You can test your ``construct_url()`` and ``payload()`` arguments without access
             state='present',
             output_level='debug',
         )
-    
+
     # A sub-class of ACIModule to overload __init__ (we don't need to log into APIC)
     class AltACIModule(ACIModule):
         def __init__(self):
             self.result = dict(changed=False)
             self.module = AltModule()
             self.params = self.module.params
-    
+
     # Instantiate our version of the ACI module
     aci = AltACIModule()
-    
+
     # Define the variables you need below
     aep = 'AEP'
     aep_domain = 'uni/phys-DOMAIN'
-    
+
     # Below test the construct_url() arguments to see if it produced correct results
     aci.construct_url(
         root_class=dict(
@@ -364,13 +364,13 @@ You can test your ``construct_url()`` and ``payload()`` arguments without access
             module_object=aep_domain,
         ),
     )
-    
+
     # Below test the payload arguments to see if it produced correct results
     aci.payload(
         aci_class='infraRsDomP',
         class_config=dict(tDn=aep_domain),
     )
-    
+
     # Print the URL and proposed payload
     print 'URL:', json.dumps(aci.url, indent=4)
     print 'PAYLOAD:', json.dumps(aci.proposed, indent=4)
@@ -399,7 +399,7 @@ You can run from your fork something like:
 
 .. seealso::
 
-   :doc:`testing_sanity`
+   :ref:`testing_sanity`
         Information on how to build sanity tests.
 
 
@@ -423,13 +423,13 @@ You may want to edit the used inventory at *test/integration/inventory.networkin
     aci_password=my-password
     aci_use_ssl=yes
     aci_use_proxy=no
-    
+
     [aci]
     localhost ansible_ssh_host=127.0.0.1 ansible_connection=local
 
 .. seealso::
 
-   :doc:`testing_integration`
+   :ref:`testing_integration`
        Information on how to build integration tests.
 
 

@@ -1,3 +1,6 @@
+from __future__ import (absolute_import, division, print_function)
+__metaclass__ = type
+
 from ansible.plugins.callback import CallbackBase
 
 DOCUMENTATION = '''
@@ -13,7 +16,6 @@ class CallbackModule(CallbackBase):
     CALLBACK_VERSION = 2.0
     CALLBACK_TYPE = 'aggregate'
     CALLBACK_NAME = 'usercallback'
-    CALLBACK_NEEDS_WHITELIST = True
 
     def __init__(self):
 

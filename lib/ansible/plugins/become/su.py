@@ -5,7 +5,7 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 DOCUMENTATION = """
-    become: su
+    name: su
     short_description: Substitute User
     description:
         - This become plugins allows your remote/login user to execute commands as another user via the su utility.
@@ -71,7 +71,10 @@ DOCUMENTATION = """
             description:
                 - List of localized strings to match for prompt detection
                 - If empty we'll use the built in one
+                - Do NOT add a colon (:) to your custom entries. Ansible adds a colon at the end of each prompt;
+                  if you add another one in your string, your prompt will fail with a "Timeout" error.
             default: []
+            type: list
             ini:
               - section: su_become_plugin
                 key: localized_prompts

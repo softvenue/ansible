@@ -9,8 +9,6 @@ __metaclass__ = type
 
 import pytest
 
-from units.mock.procenv import ModuleTestCase
-
 from units.compat.mock import patch
 
 from ansible.module_utils.six.moves import builtins
@@ -44,12 +42,6 @@ def test_get_platform():
 # get_distribution tests
 #
 
-def test_get_distribution_not_linux():
-    """If it's not Linux, then it has no distribution"""
-    with patch('platform.system', return_value='Foo'):
-        assert get_distribution() is None
-
-
 @pytest.mark.usefixtures("platform_linux")
 class TestGetDistribution:
     """Tests for get_distribution that have to find something"""
@@ -71,6 +63,9 @@ class TestGetDistribution:
 
         with patch('ansible.module_utils.distro.id', return_value="debian"):
             assert get_distribution() == "Debian"
+
+        with patch('ansible.module_utils.distro.id', return_value="flatcar"):
+            assert get_distribution() == "Flatcar"
 
         with patch('ansible.module_utils.distro.id', return_value="linuxmint"):
             assert get_distribution() == "Linuxmint"
@@ -112,11 +107,6 @@ class TestGetDistribution:
 #
 # get_distribution_version tests
 #
-
-def test_get_distribution_version_not_linux():
-    """If it's not Linux, then it has no distribution"""
-    with patch('platform.system', return_value='Foo'):
-        assert get_distribution_version() is None
 
 
 @pytest.mark.usefixtures("platform_linux")

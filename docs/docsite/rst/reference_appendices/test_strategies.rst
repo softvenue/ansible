@@ -15,7 +15,7 @@ we'll go into some patterns for integrating tests of infrastructure and discuss 
 .. note:: This is a chapter about testing the application you are deploying, not the chapter on how to test Ansible modules during development.  For that content, please hop over to the Development section.
 
 By incorporating a degree of testing into your deployment workflow, there will be fewer surprises when code hits production and, in many cases,
-tests can be leveraged in production to prevent failed updates from migrating across an entire installation.  Since it's push-based, it's
+tests can be used in production to prevent failed updates from migrating across an entire installation.  Since it's push-based, it's
 also very easy to run the steps on the localhost or testing servers. Ansible lets you insert as many checks and balances into your upgrade workflow as you would like to have.
 
 The Right Level of Testing
@@ -46,8 +46,8 @@ In the above setup, `--check` mode in Ansible can be used as a layer of testing 
 existing system, using the `--check` flag to the `ansible` command will report if Ansible thinks it would have had to have made any changes to
 bring the system into a desired state.
 
-This can let you know up front if there is any need to deploy onto the given system.  Ordinarily scripts and commands don't run in check mode, so if you
-want certain steps to always execute in check mode, such as calls to the script module, disable check mode for those tasks::
+This can let you know up front if there is any need to deploy onto the given system.  Ordinarily, scripts and commands don't run in check mode, so if you
+want certain steps to execute in normal mode even when the `--check` flag is used, such as calls to the script module, disable check mode for those tasks::
 
 
    roles:
@@ -73,7 +73,7 @@ Here's an example of using the URI module to make sure a web service returns::
 
    tasks:
 
-     - action: uri url=http://www.example.com return_content=yes
+     - action: uri url=https://www.example.com return_content=yes
        register: webpage
 
      - fail:
@@ -101,7 +101,7 @@ And the assert module makes it very easy to validate various kinds of truth::
             - "'not ready' not in cmd_result.stderr"
             - "'gizmo enabled' in cmd_result.stdout"
 
-Should you feel the need to test for existence of files that are not declaratively set by your Ansible configuration, the 'stat' module is a great choice::
+Should you feel the need to test for the existence of files that are not declaratively set by your Ansible configuration, the 'stat' module is a great choice::
 
    tasks:
 
@@ -172,7 +172,7 @@ This is the great culmination of embedded tests::
           command: /usr/bin/add_back_to_pool {{ inventory_hostname }}
           delegate_to: 127.0.0.1
 
-Of course in the above, the "take out of the pool" and "add back" steps would be replaced with a call to a Ansible load balancer
+Of course in the above, the "take out of the pool" and "add back" steps would be replaced with a call to an Ansible load balancer
 module or appropriate shell command.  You might also have steps that use a monitoring module to start and end an outage window
 for the machine.
 
@@ -262,14 +262,13 @@ system.
 
 .. seealso::
 
-   :ref:`all_modules`
-       All the documentation for Ansible modules
+   :ref:`list_of_collections`
+       Browse existing collections, modules, and plugins
    :ref:`working_with_playbooks`
        An introduction to playbooks
    :ref:`playbooks_delegation`
        Delegation, useful for working with load balancers, clouds, and locally executed steps.
    `User Mailing List <https://groups.google.com/group/ansible-project>`_
        Have a question?  Stop by the google group!
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
-
+   :ref:`communication_irc`
+       How to join Ansible chat channels

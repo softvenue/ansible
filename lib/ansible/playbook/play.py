@@ -22,7 +22,9 @@ __metaclass__ = type
 from ansible import constants as C
 from ansible import context
 from ansible.errors import AnsibleParserError, AnsibleAssertionError
-from ansible.module_utils.six import string_types
+from ansible.module_utils._text import to_native
+from ansible.module_utils.common.collections import is_sequence
+from ansible.module_utils.six import binary_type, string_types, text_type
 from ansible.playbook.attribute import FieldAttribute
 from ansible.playbook.base import Base
 from ansible.playbook.block import Block
@@ -52,11 +54,11 @@ class Play(Base, Taggable, CollectionSearch):
     """
 
     # =================================================================================
-    _hosts = FieldAttribute(isa='list', required=True, listof=string_types, always_post_validate=True)
+    _hosts = FieldAttribute(isa='list', required=True, listof=string_types, always_post_validate=True, priority=-1)
 
     # Facts
     _gather_facts = FieldAttribute(isa='bool', default=None, always_post_validate=True)
-    _gather_subset = FieldAttribute(isa='list', default=None, listof=string_types, always_post_validate=True)
+    _gather_subset = FieldAttribute(isa='list', default=(lambda: C.DEFAULT_GATHER_SUBSET), listof=string_types, always_post_validate=True)
     _gather_timeout = FieldAttribute(isa='int', default=C.DEFAULT_GATHER_TIMEOUT, always_post_validate=True)
     _fact_path = FieldAttribute(isa='string', default=C.DEFAULT_FACT_PATH)
 
@@ -93,20 +95,43 @@ class Play(Base, Taggable, CollectionSearch):
         self.only_tags = set(context.CLIARGS.get('tags', [])) or frozenset(('all',))
         self.skip_tags = set(context.CLIARGS.get('skip_tags', []))
 
+        self._action_groups = {}
+        self._group_actions = {}
+
     def __repr__(self):
         return self.get_name()
 
+    def _validate_hosts(self, attribute, name, value):
+        # Only validate 'hosts' if a value was passed in to original data set.
+        if 'hosts' in self._ds:
+            if not value:
+                raise AnsibleParserError("Hosts list cannot be empty. Please check your playbook")
+
+            if is_sequence(value):
+                # Make sure each item in the sequence is a valid string
+                for entry in value:
+                    if entry is None:
+                        raise AnsibleParserError("Hosts list cannot contain values of 'None'. Please check your playbook")
+                    elif not isinstance(entry, (binary_type, text_type)):
+                        raise AnsibleParserError("Hosts list contains an invalid host value: '{host!s}'".format(host=entry))
+
+            elif not isinstance(value, (binary_type, text_type)):
+                raise AnsibleParserError("Hosts list must be a sequence or string. Please check your playbook.")
+
     def get_name(self):
         ''' return the name of the Play '''
+        if self.name:
+            return self.name
+
+        if is_sequence(self.hosts):
+            self.name = ','.join(self.hosts)
+        else:
+            self.name = self.hosts or ''
+
         return self.name
 
     @staticmethod
     def load(data, variable_manager=None, loader=None, vars=None):
-        if ('name' not in data or data['name'] is None) and 'hosts' in data:
-            if isinstance(data['hosts'], list):
-                data['name'] = ','.join(data['hosts'])
-            else:
-                data['name'] = data['hosts']
         p = Play()
         if vars:
             p.vars = vars.copy()
@@ -127,8 +152,8 @@ class Play(Base, Taggable, CollectionSearch):
             # this should never happen, but error out with a helpful message
             # to the user if it does...
             if 'remote_user' in ds:
-                raise AnsibleParserError("both 'user' and 'remote_user' are set for %s. "
-                                         "The use of 'user' is deprecated, and should be removed" % self.get_name(), obj=ds)
+                raise AnsibleParserError("both 'user' and 'remote_user' are set for this play. "
+                                         "The use of 'user' is deprecated, and should be removed", obj=ds)
 
             ds['remote_user'] = ds['user']
             del ds['user']
@@ -143,7 +168,7 @@ class Play(Base, Taggable, CollectionSearch):
         try:
             return load_list_of_blocks(ds=ds, play=self, variable_manager=self._variable_manager, loader=self._loader)
         except AssertionError as e:
-            raise AnsibleParserError("A malformed block was encountered while loading tasks", obj=self._ds, orig_exc=e)
+            raise AnsibleParserError("A malformed block was encountered while loading tasks: %s" % to_native(e), obj=self._ds, orig_exc=e)
 
     def _load_pre_tasks(self, attr, ds):
         '''
@@ -189,7 +214,8 @@ class Play(Base, Taggable, CollectionSearch):
             ds = []
 
         try:
-            role_includes = load_list_of_roles(ds, play=self, variable_manager=self._variable_manager, loader=self._loader)
+            role_includes = load_list_of_roles(ds, play=self, variable_manager=self._variable_manager,
+                                               loader=self._loader, collection_search_list=self.collections)
         except AssertionError as e:
             raise AnsibleParserError("A malformed role declaration was encountered.", obj=self._ds, orig_exc=e)
 
@@ -197,11 +223,9 @@ class Play(Base, Taggable, CollectionSearch):
         for ri in role_includes:
             roles.append(Role.load(ri, play=self))
 
-        return self._extend_value(
-            self.roles,
-            roles,
-            prepend=True
-        )
+        self.roles[:0] = roles
+
+        return self.roles
 
     def _load_vars_prompt(self, attr, ds):
         new_ds = preprocess_vars(ds)
@@ -209,9 +233,11 @@ class Play(Base, Taggable, CollectionSearch):
         if new_ds is not None:
             for prompt_data in new_ds:
                 if 'name' not in prompt_data:
-                    raise AnsibleParserError("Invalid vars_prompt data structure", obj=ds)
-                else:
-                    vars_prompts.append(prompt_data)
+                    raise AnsibleParserError("Invalid vars_prompt data structure, missing 'name' key", obj=ds)
+                for key in prompt_data:
+                    if key not in ('name', 'prompt', 'default', 'private', 'confirm', 'encrypt', 'salt_size', 'salt', 'unsafe'):
+                        raise AnsibleParserError("Invalid vars_prompt data structure, found unsupported key '%s'" % key, obj=ds)
+                vars_prompts.append(prompt_data)
         return vars_prompts
 
     def _compile_roles(self):
@@ -268,6 +294,9 @@ class Play(Base, Taggable, CollectionSearch):
             loader=self._loader
         )
 
+        for task in flush_block.block:
+            task.implicit = True
+
         block_list = []
 
         block_list.extend(self.pre_tasks)
@@ -313,6 +342,8 @@ class Play(Base, Taggable, CollectionSearch):
             roles.append(role.serialize())
         data['roles'] = roles
         data['included_path'] = self._included_path
+        data['action_groups'] = self._action_groups
+        data['group_actions'] = self._group_actions
 
         return data
 
@@ -320,6 +351,8 @@ class Play(Base, Taggable, CollectionSearch):
         super(Play, self).deserialize(data)
 
         self._included_path = data.get('included_path', None)
+        self._action_groups = data.get('action_groups', {})
+        self._group_actions = data.get('group_actions', {})
         if 'roles' in data:
             role_data = data.get('roles', [])
             roles = []
@@ -336,4 +369,6 @@ class Play(Base, Taggable, CollectionSearch):
         new_me.ROLE_CACHE = self.ROLE_CACHE.copy()
         new_me._included_conditional = self._included_conditional
         new_me._included_path = self._included_path
+        new_me._action_groups = self._action_groups
+        new_me._group_actions = self._group_actions
         return new_me

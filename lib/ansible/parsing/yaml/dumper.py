@@ -21,18 +21,20 @@ __metaclass__ = type
 
 import yaml
 
-from ansible.module_utils.six import PY3
+from ansible.module_utils.six import PY3, text_type, binary_type
+from ansible.module_utils.common.yaml import SafeDumper
 from ansible.parsing.yaml.objects import AnsibleUnicode, AnsibleSequence, AnsibleMapping, AnsibleVaultEncryptedUnicode
-from ansible.utils.unsafe_proxy import AnsibleUnsafeText
+from ansible.utils.unsafe_proxy import AnsibleUnsafeText, AnsibleUnsafeBytes
+from ansible.template import AnsibleUndefined
 from ansible.vars.hostvars import HostVars, HostVarsVars
+from ansible.vars.manager import VarsWithSources
 
 
-class AnsibleDumper(yaml.SafeDumper):
+class AnsibleDumper(SafeDumper):
     '''
     A simple stub class that allows us to add representers
     for our overridden object types.
     '''
-    pass
 
 
 def represent_hostvars(self, data):
@@ -45,9 +47,25 @@ def represent_vault_encrypted_unicode(self, data):
 
 
 if PY3:
-    represent_unicode = yaml.representer.SafeRepresenter.represent_str
+    def represent_unicode(self, data):
+        return yaml.representer.SafeRepresenter.represent_str(self, text_type(data))
+
+    def represent_binary(self, data):
+        return yaml.representer.SafeRepresenter.represent_binary(self, binary_type(data))
 else:
-    represent_unicode = yaml.representer.SafeRepresenter.represent_unicode
+    def represent_unicode(self, data):
+        return yaml.representer.SafeRepresenter.represent_unicode(self, text_type(data))
+
+    def represent_binary(self, data):
+        return yaml.representer.SafeRepresenter.represent_str(self, binary_type(data))
+
+
+def represent_undefined(self, data):
+    # Here bool will ensure _fail_with_undefined_error happens
+    # if the value is Undefined.
+    # This happens because Jinja sets __bool__ on StrictUndefined
+    return bool(data)
+
 
 AnsibleDumper.add_representer(
     AnsibleUnicode,
@@ -60,12 +78,22 @@ AnsibleDumper.add_representer(
 )
 
 AnsibleDumper.add_representer(
+    AnsibleUnsafeBytes,
+    represent_binary,
+)
+
+AnsibleDumper.add_representer(
     HostVars,
     represent_hostvars,
 )
 
 AnsibleDumper.add_representer(
     HostVarsVars,
+    represent_hostvars,
+)
+
+AnsibleDumper.add_representer(
+    VarsWithSources,
     represent_hostvars,
 )
 
@@ -82,4 +110,9 @@ AnsibleDumper.add_representer(
 AnsibleDumper.add_representer(
     AnsibleVaultEncryptedUnicode,
     represent_vault_encrypted_unicode,
+)
+
+AnsibleDumper.add_representer(
+    AnsibleUndefined,
+    represent_undefined,
 )

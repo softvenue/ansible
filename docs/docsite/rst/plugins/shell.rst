@@ -1,6 +1,6 @@
 .. _shell_plugins:
 
-Shell Plugins
+Shell plugins
 =============
 
 .. contents::
@@ -33,26 +33,21 @@ In this case, you will also want to update the :ref:`ansible_shell_executable <a
 You can further control the settings for each plugin via other configuration options
 detailed in the plugin themselves (linked below).
 
-.. toctree:: :maxdepth: 1
-    :glob:
-
-    shell/*
-
 .. seealso::
 
    :ref:`about_playbooks`
        An introduction to playbooks
    :ref:`inventory_plugins`
-       Ansible inventory plugins
+       Inventory plugins
    :ref:`callback_plugins`
-       Ansible callback plugins
-   :ref:`playbooks_filters`
-       Jinja2 filter plugins
-   :ref:`playbooks_tests`
-       Jinja2 test plugins
-   :ref:`playbooks_lookups`
-       Jinja2 lookup plugins
+       Callback plugins
+   :ref:`filter_plugins`
+       Filter plugins
+   :ref:`test_plugins`
+       Test plugins
+   :ref:`lookup_plugins`
+       Lookup plugins
    `User Mailing List <https://groups.google.com/group/ansible-devel>`_
        Have a question?  Stop by the google group!
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
+   :ref:`communication_irc`
+       How to join Ansible chat channels

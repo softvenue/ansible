@@ -9,26 +9,28 @@ __metaclass__ = type
 
 import getpass
 import os
-import re
 import subprocess
 import sys
 
 from abc import ABCMeta, abstractmethod
 
+from ansible.cli.arguments import option_helpers as opt_help
 from ansible import constants as C
 from ansible import context
-from ansible.cli.arguments import option_helpers as opt_help
 from ansible.errors import AnsibleError
 from ansible.inventory.manager import InventoryManager
-from ansible.module_utils.six import with_metaclass, string_types
+from ansible.module_utils.six import with_metaclass, string_types, PY3
 from ansible.module_utils._text import to_bytes, to_text
 from ansible.parsing.dataloader import DataLoader
-from ansible.release import __version__
-from ansible.utils.display import Display
-from ansible.utils.path import unfrackpath
-from ansible.vars.manager import VariableManager
 from ansible.parsing.vault import PromptVaultSecret, get_file_vault_secret
 from ansible.plugins.loader import add_all_plugin_dirs
+from ansible.release import __version__
+from ansible.utils.collection_loader import AnsibleCollectionConfig
+from ansible.utils.collection_loader._collection_finder import _get_collection_name_from_path
+from ansible.utils.display import Display
+from ansible.utils.path import unfrackpath
+from ansible.utils.unsafe_proxy import to_unsafe_text
+from ansible.vars.manager import VariableManager
 
 try:
     import argcomplete
@@ -42,12 +44,6 @@ display = Display()
 
 class CLI(with_metaclass(ABCMeta, object)):
     ''' code behind bin/ansible* programs '''
-
-    _ITALIC = re.compile(r"I\(([^)]+)\)")
-    _BOLD = re.compile(r"B\(([^)]+)\)")
-    _MODULE = re.compile(r"M\(([^)]+)\)")
-    _URL = re.compile(r"U\(([^)]+)\)")
-    _CONST = re.compile(r"C\(([^)]+)\)")
 
     PAGER = 'less'
 
@@ -67,6 +63,13 @@ class CLI(with_metaclass(ABCMeta, object)):
         self.args = args
         self.parser = None
         self.callback = callback
+
+        if C.DEVEL_WARNING and __version__.endswith('dev0'):
+            display.warning(
+                'You are running the development version of Ansible. You should only run Ansible from "devel" if '
+                'you are modifying the Ansible engine, or trying out features under development. This is a rapidly '
+                'changing source of code and can become unstable at any point.'
+            )
 
     @abstractmethod
     def run(self):
@@ -92,8 +95,11 @@ class CLI(with_metaclass(ABCMeta, object)):
                 alt = ', use %s instead' % deprecated[1]['alternatives']
             else:
                 alt = ''
-            ver = deprecated[1]['version']
-            display.deprecated("%s option, %s %s" % (name, why, alt), version=ver)
+            ver = deprecated[1].get('version')
+            date = deprecated[1].get('date')
+            collection_name = deprecated[1].get('collection_name')
+            display.deprecated("%s option, %s%s" % (name, why, alt),
+                               version=ver, date=date, collection_name=collection_name)
 
     @staticmethod
     def split_vault_id(vault_id):
@@ -224,6 +230,14 @@ class CLI(with_metaclass(ABCMeta, object)):
         return vault_secrets
 
     @staticmethod
+    def _get_secret(prompt):
+
+        secret = getpass.getpass(prompt=prompt)
+        if secret:
+            secret = to_unsafe_text(secret)
+        return secret
+
+    @staticmethod
     def ask_passwords():
         ''' prompt for connection and become passwords if needed '''
 
@@ -235,20 +249,20 @@ class CLI(with_metaclass(ABCMeta, object)):
         become_prompt_method = "BECOME" if C.AGNOSTIC_BECOME_PROMPT else op['become_method'].upper()
 
         try:
+            become_prompt = "%s password: " % become_prompt_method
             if op['ask_pass']:
-                sshpass = getpass.getpass(prompt="SSH password: ")
+                sshpass = CLI._get_secret("SSH password: ")
                 become_prompt = "%s password[defaults to SSH password]: " % become_prompt_method
-                if sshpass:
-                    sshpass = to_bytes(sshpass, errors='strict', nonstring='simplerepr')
-            else:
-                become_prompt = "%s password: " % become_prompt_method
+            elif op['connection_password_file']:
+                sshpass = CLI.get_password_from_file(op['connection_password_file'])
 
             if op['become_ask_pass']:
-                becomepass = getpass.getpass(prompt=become_prompt)
+                becomepass = CLI._get_secret(become_prompt)
                 if op['ask_pass'] and becomepass == '':
                     becomepass = sshpass
-                if becomepass:
-                    becomepass = to_bytes(becomepass)
+            elif op['become_password_file']:
+                becomepass = CLI.get_password_from_file(op['become_password_file'])
+
         except EOFError:
             pass
 
@@ -302,6 +316,9 @@ class CLI(with_metaclass(ABCMeta, object)):
         # process tags
         if hasattr(options, 'tags') and not options.tags:
             # optparse defaults does not do what's expected
+            # More specifically, we want `--tags` to be additive. So we cannot
+            # simply change C.TAGS_RUN's default to ["all"] because then passing
+            # --tags foo would cause us to have ['all', 'foo']
             options.tags = ['all']
         if hasattr(options, 'tags') and options.tags:
             tags = set()
@@ -332,6 +349,16 @@ class CLI(with_metaclass(ABCMeta, object)):
             else:
                 options.inventory = C.DEFAULT_HOST_LIST
 
+        # Dup args set on the root parser and sub parsers results in the root parser ignoring the args. e.g. doing
+        # 'ansible-galaxy -vvv init' has no verbosity set but 'ansible-galaxy init -vvv' sets a level of 3. To preserve
+        # back compat with pre-argparse changes we manually scan and set verbosity based on the argv values.
+        if self.parser.prog in ['ansible-galaxy', 'ansible-vault'] and not options.verbosity:
+            verbosity_arg = next(iter([arg for arg in self.args if arg.startswith('-v')]), None)
+            if verbosity_arg:
+                display.deprecated("Setting verbosity before the arg sub command is deprecated, set the verbosity "
+                                   "after the sub command", "2.13", collection_name='ansible.builtin')
+                options.verbosity = verbosity_arg.count('v')
+
         return options
 
     def parse(self):
@@ -349,7 +376,12 @@ class CLI(with_metaclass(ABCMeta, object)):
         if HAS_ARGCOMPLETE:
             argcomplete.autocomplete(self.parser)
 
-        options = self.parser.parse_args(self.args[1:])
+        try:
+            options = self.parser.parse_args(self.args[1:])
+        except SystemExit as e:
+            if(e.code != 0):
+                self.parser.exit(status=2, message=" \n%s" % self.parser.format_help())
+            raise
         options = self.post_process_args(options)
         context._init_global_context(options)
 
@@ -411,17 +443,6 @@ class CLI(with_metaclass(ABCMeta, object)):
         except KeyboardInterrupt:
             pass
 
-    @classmethod
-    def tty_ify(cls, text):
-
-        t = cls._ITALIC.sub("`" + r"\1" + "'", text)    # I(word) => `word'
-        t = cls._BOLD.sub("*" + r"\1" + "*", t)         # B(word) => *word*
-        t = cls._MODULE.sub("[" + r"\1" + "]", t)       # M(word) => [word]
-        t = cls._URL.sub(r"\1", t)                      # U(word) => word
-        t = cls._CONST.sub("`" + r"\1" + "'", t)        # C(word) => `word'
-
-        return t
-
     @staticmethod
     def _play_prereqs():
         options = context.CLIARGS
@@ -433,6 +454,11 @@ class CLI(with_metaclass(ABCMeta, object)):
         if basedir:
             loader.set_basedir(basedir)
             add_all_plugin_dirs(basedir)
+            AnsibleCollectionConfig.playbook_paths = basedir
+            default_collection = _get_collection_name_from_path(basedir)
+            if default_collection:
+                display.warning(u'running with default collection {0}'.format(default_collection))
+                AnsibleCollectionConfig.default_collection = default_collection
 
         vault_ids = list(options['vault_ids'])
         default_vault_ids = C.DEFAULT_VAULT_IDENTITY_LIST
@@ -471,3 +497,48 @@ class CLI(with_metaclass(ABCMeta, object)):
             raise AnsibleError("Specified hosts and/or --limit does not match any hosts")
 
         return hosts
+
+    @staticmethod
+    def get_password_from_file(pwd_file):
+
+        b_pwd_file = to_bytes(pwd_file)
+        secret = None
+        if b_pwd_file == b'-':
+            if PY3:
+                # ensure its read as bytes
+                secret = sys.stdin.buffer.read()
+            else:
+                secret = sys.stdin.read()
+
+        elif not os.path.exists(b_pwd_file):
+            raise AnsibleError("The password file %s was not found" % pwd_file)
+
+        elif os.path.is_executable(b_pwd_file):
+            display.vvvv(u'The password file %s is a script.' % to_text(pwd_file))
+            cmd = [b_pwd_file]
+
+            try:
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except OSError as e:
+                raise AnsibleError("Problem occured when trying to run the password script %s (%s)."
+                                   " If this is not a script, remove the executable bit from the file." % (pwd_file, e))
+
+            stdout, stderr = p.communicate()
+            if p.returncode != 0:
+                raise AnsibleError("The password script %s returned an error (rc=%s): %s" % (pwd_file, p.returncode, stderr))
+            secret = stdout
+
+        else:
+            try:
+                f = open(b_pwd_file, "rb")
+                secret = f.read().strip()
+                f.close()
+            except (OSError, IOError) as e:
+                raise AnsibleError("Could not read password file %s: %s" % (pwd_file, e))
+
+        secret = secret.strip(b'\r\n')
+
+        if not secret:
+            raise AnsibleError('Empty password was provided from file (%s)' % pwd_file)
+
+        return to_unsafe_text(secret)

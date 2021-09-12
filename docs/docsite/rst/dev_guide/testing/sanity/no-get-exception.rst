@@ -1,5 +1,5 @@
-Sanity Tests » no-get-exception
-===============================
+no-get-exception
+================
 
 We created a function, ``ansible.module_utils.pycompat24.get_exception`` to
 help retrieve exceptions in a manner compatible with Python 2.4 through
@@ -13,7 +13,7 @@ something like this:
     try:
         raise IOError('test')
     except IOError:
-        e = get_excetion()
+        e = get_exception()
         do_something(e)
     except:
         e = get_exception()

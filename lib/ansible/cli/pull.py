@@ -29,7 +29,7 @@ display = Display()
 
 
 class PullCLI(CLI):
-    ''' is used to up a remote copy of ansible on each managed node,
+    ''' Used to pull a remote copy of ansible on each managed node,
         each set to run via cron and update playbook source via a source repository.
         This inverts the default *push* architecture of ansible into a *pull* architecture,
         which has near-limitless scaling potential.
@@ -47,7 +47,6 @@ class PullCLI(CLI):
         1: 'File does not exist',
         2: 'File is not readable',
     }
-    SUPPORTED_REPO_MODULES = ['git']
     ARGUMENTS = {'playbook.yml': 'The name of one the YAML format files to run as an Ansible playbook.'
                                  'This can be a relative path within the checkout. By default, Ansible will'
                                  "look for a playbook based on the host's fully-qualified domain name,"
@@ -94,7 +93,8 @@ class PullCLI(CLI):
                                       'This is a useful way to disperse git requests')
         self.parser.add_argument('-f', '--force', dest='force', default=False, action='store_true',
                                  help='run the playbook even if the repository could not be updated')
-        self.parser.add_argument('-d', '--directory', dest='dest', default=None, help='directory to checkout repository to')
+        self.parser.add_argument('-d', '--directory', dest='dest', default=None,
+                                 help='absolute path of repository checkout directory (relative paths are not supported)')
         self.parser.add_argument('-U', '--url', dest='url', default=None, help='URL of the playbook repository')
         self.parser.add_argument('--full', dest='fullclone', action='store_true', help='Do a full clone, instead of a shallow one.')
         self.parser.add_argument('-C', '--checkout', dest='checkout',
@@ -140,8 +140,8 @@ class PullCLI(CLI):
         if not options.url:
             raise AnsibleOptionsError("URL for repository not specified, use -h for help")
 
-        if options.module_name not in self.SUPPORTED_REPO_MODULES:
-            raise AnsibleOptionsError("Unsupported repo module %s, choices are %s" % (options.module_name, ','.join(self.SUPPORTED_REPO_MODULES)))
+        if options.module_name not in self.REPO_CHOICES:
+            raise AnsibleOptionsError("Unsupported repo module %s, choices are %s" % (options.module_name, ','.join(self.REPO_CHOICES)))
 
         display.verbosity = options.verbosity
         self.validate_conflicts(options)
@@ -311,19 +311,26 @@ class PullCLI(CLI):
     @staticmethod
     def select_playbook(path):
         playbook = None
+        errors = []
         if context.CLIARGS['args'] and context.CLIARGS['args'][0] is not None:
-            playbook = os.path.join(path, context.CLIARGS['args'][0])
-            rc = PullCLI.try_playbook(playbook)
-            if rc != 0:
-                display.warning("%s: %s" % (playbook, PullCLI.PLAYBOOK_ERRORS[rc]))
-                return None
+            playbooks = []
+            for book in context.CLIARGS['args']:
+                book_path = os.path.join(path, book)
+                rc = PullCLI.try_playbook(book_path)
+                if rc != 0:
+                    errors.append("%s: %s" % (book_path, PullCLI.PLAYBOOK_ERRORS[rc]))
+                    continue
+                playbooks.append(book_path)
+            if 0 < len(errors):
+                display.warning("\n".join(errors))
+            elif len(playbooks) == len(context.CLIARGS['args']):
+                playbook = " ".join(playbooks)
             return playbook
         else:
             fqdn = socket.getfqdn()
             hostpb = os.path.join(path, fqdn + '.yml')
             shorthostpb = os.path.join(path, fqdn.split('.')[0] + '.yml')
             localpb = os.path.join(path, PullCLI.DEFAULT_PLAYBOOK)
-            errors = []
             for pb in [hostpb, shorthostpb, localpb]:
                 rc = PullCLI.try_playbook(pb)
                 if rc == 0:

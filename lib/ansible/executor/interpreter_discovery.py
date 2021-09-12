@@ -14,7 +14,7 @@ from ansible.module_utils._text import to_native, to_text
 from ansible.module_utils.distro import LinuxDistribution
 from ansible.utils.display import Display
 from ansible.utils.plugin_docs import get_versioned_doclink
-from distutils.version import LooseVersion
+from ansible.module_utils.compat.version import LooseVersion
 from traceback import format_exc
 
 display = Display()
@@ -82,7 +82,9 @@ def discover_interpreter(action, interpreter_name, discovery_mode, task_vars):
         display.debug(u"found interpreters: {0}".format(found_interpreters), host=host)
 
         if not found_interpreters:
-            action._discovery_warnings.append(u'No python interpreters found for host {0} (tried {1})'.format(host, bootstrap_python_list))
+            if not is_silent:
+                action._discovery_warnings.append(u'No python interpreters found for '
+                                                  u'host {0} (tried {1})'.format(host, bootstrap_python_list))
             # this is lame, but returning None or throwing an exception is uglier
             return u'/usr/bin/python'
 
@@ -114,16 +116,13 @@ def discover_interpreter(action, interpreter_name, discovery_mode, task_vars):
         # provide a transition period for hosts that were using /usr/bin/python previously (but shouldn't have been)
         if is_auto_legacy:
             if platform_interpreter != u'/usr/bin/python' and u'/usr/bin/python' in found_interpreters:
-                # FIXME: support comments in sivel's deprecation scanner so we can get reminded on this
                 if not is_silent:
-                    action._discovery_deprecation_warnings.append(dict(
-                        msg=u"Distribution {0} {1} on host {2} should use {3}, but is using "
-                            u"/usr/bin/python for backward compatibility with prior Ansible releases. "
-                            u"A future Ansible release will default to using the discovered platform "
-                            u"python for this host. See {4} for more information"
-                            .format(distro, version, host, platform_interpreter,
-                                    get_versioned_doclink('reference_appendices/interpreter_discovery.html')),
-                        version='2.12'))
+                    action._discovery_warnings.append(
+                        u"Distribution {0} {1} on host {2} should use {3}, but is using "
+                        u"/usr/bin/python for backward compatibility with prior Ansible releases. "
+                        u"See {4} for more information"
+                        .format(distro, version, host, platform_interpreter,
+                                get_versioned_doclink('reference_appendices/interpreter_discovery.html')))
                 return u'/usr/bin/python'
 
         if platform_interpreter not in found_interpreters:
@@ -156,7 +155,7 @@ def discover_interpreter(action, interpreter_name, discovery_mode, task_vars):
     if not is_silent:
         action._discovery_warnings \
             .append(u"Platform {0} on host {1} is using the discovered Python interpreter at {2}, but future installation of "
-                    u"another Python interpreter could change this. See {3} "
+                    u"another Python interpreter could change the meaning of that path. See {3} "
                     u"for more information."
                     .format(platform_type, host, found_interpreters[0],
                             get_versioned_doclink('reference_appendices/interpreter_discovery.html')))
